@@ -132,9 +132,9 @@ A config file holds a generator's keyword arguments in YAML, plus its `kind`:
 
 ```yaml
 kind: peg
-hole: {type: stadium, width: 0.00834, height: 0.00256}
+hole: {type: stadium, width: 0.00834, height: 0.00256, max_error: 1.0e-5}
 islands:
-  - {type: stadium, width: 0.0065, height: 0.0007}
+  - {type: stadium, width: 0.0065, height: 0.0007, max_error: 1.0e-5}
 clearance: 5.0e-5
 plate_thickness: 0.0062
 peg_length: 0.012
