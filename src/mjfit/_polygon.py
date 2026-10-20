@@ -262,7 +262,7 @@ def ear_clip(poly: np.ndarray) -> list[np.ndarray]:
 
 
 def triangulate(outer: np.ndarray, holes: list[np.ndarray] = ()) -> list[np.ndarray]:
-    """Triangulate a CCW polygon minus CCW holes."""
+    """Triangulate a CCW polygon minus CCW holes (degenerate triangles dropped)."""
     if not len(holes):
         return ear_clip(outer)
     rings = [np.asarray(outer, dtype=np.float64)]
@@ -270,7 +270,8 @@ def triangulate(outer: np.ndarray, holes: list[np.ndarray] = ()) -> list[np.ndar
     vertices = np.concatenate(rings, axis=0)
     ring_end = np.cumsum([len(r) for r in rings]).astype(np.uint32)
     idx = mapbox_earcut.triangulate_float64(vertices, ring_end)
-    return [ensure_ccw(vertices[idx[i:i + 3]]) for i in range(0, len(idx), 3)]
+    triangles = [vertices[idx[i:i + 3]] for i in range(0, len(idx), 3)]
+    return [ensure_ccw(t) for t in triangles if abs(2 * signed_area(t)) > TOL]
 
 
 def fan(poly: np.ndarray) -> list[np.ndarray]:

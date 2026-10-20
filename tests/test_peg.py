@@ -193,6 +193,14 @@ def test_invalid_input_is_rejected_with_a_reason(kw, match):
         mjfit.peg(**kw)
 
 
+def test_collinear_pockets_leave_no_flat_triangle():
+    """earcut can join three pocket corners on one line, a triangle MuJoCo
+    cannot hull. db9's pins at 0.4 mm radius do; the flat triangle is dropped."""
+    cfg = mjfit.load('db9')
+    islands = [{**s, 'radius': 0.0004} for s in cfg['islands']]
+    mujoco.MjModel.from_xml_string(mjfit.build(cfg, islands=islands))
+
+
 def test_hollow_peg_back_is_decomposed_when_not_convex():
     xml = mjfit.peg(**CASES['star_islands'])
     backs = [k for k in inline_meshes(xml) if k.startswith('peg_back_')]
