@@ -1,9 +1,10 @@
 # USB-C (Type-C spec R2.0): an 8.34 x 2.56 mm stadium with a 6.5 x 0.7 mm
-# tongue in the middle, at a tight 50 um clearance.
+# tongue in the middle, at a tight 50 um clearance. The round ends are drawn
+# to within 10 um, a fifth of the clearance.
 kind: peg
-hole: {type: stadium, width: 0.00834, height: 0.00256}
+hole: {type: stadium, width: 0.00834, height: 0.00256, max_error: 1.0e-5}
 islands:
-  - {type: stadium, width: 0.0065, height: 0.0007}
+  - {type: stadium, width: 0.0065, height: 0.0007, max_error: 1.0e-5}
 clearance: 5.0e-5
 plate_size: 0.02
 plate_thickness: 0.0062

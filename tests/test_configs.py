@@ -1,5 +1,7 @@
 """Bundled configs and the config loader."""
 
+import warnings
+
 import mujoco
 import numpy as np
 import pytest
@@ -9,7 +11,9 @@ import mjfit
 
 @pytest.mark.parametrize('name', sorted(mjfit.configs()))
 def test_bundled_config_builds_and_settles(name):
-    model = mujoco.MjModel.from_xml_string(mjfit.build(name))
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')  # curves drawn well within the clearance
+        model = mujoco.MjModel.from_xml_string(mjfit.build(name))
     data = mujoco.MjData(model)
     for _ in range(300):
         mujoco.mj_step(model, data)

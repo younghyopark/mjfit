@@ -40,9 +40,16 @@ counterclockwise array. In a config the same shapes are mappings:
 and its corners stick out by at most `max_error` (or use exactly `n` sides). A hole is
 therefore never smaller than drawn. The peg is the hole's exact offset, so the
 clearance holds along every flat and grows only at the `n` corners, by
-`clearance * (1/cos(pi/n) - 1)`. Stadium ends work the same way. `bezier` instead
-samples points on its curves (each chord cuts in by at most `max_error`): there the
-polygon is the shape.
+`clearance * (1/cos(pi/n) - 1)`. Stadium ends and round islands work the same way, so
+an island is never thinner than drawn. `bezier` instead samples points on its curves
+(each chord cuts in by at most `max_error`): there the polygon is the shape.
+
+The clearance is exact between the polygons, but each polygon strays from its curve
+by up to `max_error`. Against the round parts they stand for, the peg's corners stick
+out nearly as far as the hole's, and an island's corners reach as far into the gap a
+real plug leaves around it. Keep `max_error` well below the clearance; a tenth keeps
+every part within a tenth of the clearance of the real one. `mjfit.peg` warns when a
+curve of the hole, the peg, or an island strays further than the clearance.
 
 ## Islands and hollow pegs
 

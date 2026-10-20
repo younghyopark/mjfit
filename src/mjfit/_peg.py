@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import numbers
+import warnings
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -63,6 +64,8 @@ def peg(
             tongue or connector pins. The peg becomes a hollow shell with a
             pocket around each island. Needs ``hole``.
         clearance: Gap between every peg edge and its hole edge, in meters.
+            Curves in the hole, peg and islands should be drawn to well within
+            it (their ``max_error``); a coarser one warns.
         peg_length: Length of the part of the peg that fits the hole.
         handle: Convex outline of a wider grip section above the peg. It must
             contain the peg outline.
@@ -131,17 +134,24 @@ def peg(
     handle_h, margin = handle_height * scale, handle_margin * scale
     rim, bottom = min_rim * scale, bottom_thickness * scale
 
-    def resolve(spec, name):
-        return shapes.from_spec(spec, name=name) * scale
+    def resolve(spec, name, fits=False):
+        poly = shapes.from_spec(spec, name=name)
+        error = _curve_error(spec, poly) if fits else 0.0
+        if error > clearance:
+            warnings.warn(f"{name}: its polygon strays up to {error:.2g} m from the curve, more "
+                          f"than the {clearance:g} m clearance, so a part can overlap the real "
+                          "outline of the other. Set max_error well below the clearance.",
+                          stacklevel=3)
+        return poly * scale
 
     # ---- outlines --------------------------------------------------------
     if peg is not None:
-        source = resolve(peg, 'peg')
+        source = resolve(peg, 'peg', fits=True)
     else:
-        source = resolve(hole, 'hole')
+        source = resolve(hole, 'hole', fits=True)
     shift = _centroid(source) if center else np.zeros(2)
     source = source - shift
-    isl = [resolve(s, f'island {k}') - shift for k, s in enumerate(islands)]
+    isl = [resolve(s, f'island {k}', fits=True) - shift for k, s in enumerate(islands)]
     pockets: list[np.ndarray] = []
     if peg is not None:
         insert = source
@@ -285,6 +295,18 @@ def _geom(body, name, mesh, rgba, extra, *, density, mass=None):
 def _check(ok: bool, message: str) -> None:
     if not ok:
         raise ValueError(message)
+
+
+def _curve_error(spec, poly: np.ndarray) -> float:
+    """How far the polygon of a shape spec may stray from its curve (0 if straight)."""
+    kind = spec.get('type') if isinstance(spec, dict) else None
+    if kind == 'bezier':
+        curved = np.any(np.asarray(spec.get('rounding', 0.5), dtype=float) > 0)
+        return spec.get('max_error', shapes.MAX_ERROR) if curved else 0.0
+    if kind not in ('circle', 'stadium'):
+        return 0.0
+    r = spec['radius'] if kind == 'circle' else min(spec['width'], spec['height']) / 2
+    return r / math.cos(math.pi / len(poly)) - r      # corners of a circumscribed n-gon
 
 
 def _centroid(poly: np.ndarray) -> np.ndarray:

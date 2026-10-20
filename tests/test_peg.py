@@ -1,5 +1,6 @@
 """Peg-in-hole geometry: exact convex pieces, clearance, frames and masses."""
 
+import warnings
 import xml.etree.ElementTree as ET
 
 import mujoco
@@ -116,6 +117,38 @@ def test_circle_hole_is_never_smaller_than_drawn():
     mid = hole + edges / 2
     np.testing.assert_allclose(np.linalg.norm(mid, axis=1), radius, rtol=1e-12)  # flats touch
     assert np.linalg.norm(hole, axis=1).max() <= radius + error  # corners bounded
+
+
+def test_peg_corners_stay_inside_the_round_hole():
+    """Against a round peg the peg's corners stick out by the hole's corner
+    error times 1 - clearance/radius, so with max_error at most the clearance
+    they stay inside the round hole."""
+    radius, c = 0.00128, 5e-5
+    for error in (1e-5, 5e-5):
+        spec = {'type': 'circle', 'radius': radius, 'max_error': error}
+        xml = mjfit.peg(hole=spec, clearance=c, center=False)
+        reach = np.linalg.norm(inline_meshes(xml)['peg_0'][:, :2], axis=1).max()
+        n = len(shapes.from_spec(spec))
+        assert reach == pytest.approx((radius - c) / np.cos(np.pi / n), rel=1e-9)
+        assert reach < radius
+
+
+def test_curves_coarser_than_the_clearance_warn():
+    usb_c = {'type': 'stadium', 'width': 0.00834, 'height': 0.00256}
+    tongue = {'type': 'stadium', 'width': 0.0065, 'height': 0.0007}
+    rounded = {'type': 'bezier', 'vertices': CONTROL.tolist()}
+    for kw in (
+        dict(hole=usb_c),
+        dict(peg=usb_c),
+        dict(hole=usb_c, scale=10.0),
+        dict(hole=shapes.rect(0.009, 0.003), islands=[tongue]),
+        dict(hole=rounded),
+    ):
+        with pytest.warns(UserWarning, match='more than the 5e-05 m clearance'):
+            mjfit.peg(**kw, clearance=5e-5)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        mjfit.peg(hole={**usb_c, 'max_error': 1e-5}, clearance=5e-5)
 
 
 def test_frames_mass_and_bottom():

@@ -3,9 +3,11 @@
 Every function returns a counterclockwise ``(n, 2)`` array of vertices in
 meters. Angles are in degrees. Curves become polygons that *circumscribe*
 them: the flats touch the curve and the corners stick out by at most
-``max_error``. A hole is therefore never smaller than drawn, and since the
-matching peg is an exact offset of the hole, the clearance is exact along
-every flat and only grows at the corners.
+``max_error``. A hole is therefore never smaller than drawn (and an island
+never thinner), and since the matching peg is an exact offset of the hole,
+the clearance is exact along every flat and only grows at the corners.
+Against the curves themselves, though, each part is off by up to
+``max_error``, so keep it well below the clearance.
 
 The exception is :func:`bezier`, whose vertices lie on the curve (the chords
 cut inside it by at most ``max_error``): there the polygon is the shape.

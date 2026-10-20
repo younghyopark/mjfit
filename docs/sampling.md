@@ -16,8 +16,12 @@ many samples you draw. From the command line, `mjfit sample -n 100 --family conv
 Every option takes a fixed value or a `(low, high)` range to draw from uniformly:
 
 ```python
-mjfit.sample_pegs(100, clearance=(2e-5, 1e-4), islands=2, handle_probability=0.0)
+mjfit.sample_pegs(100, clearance=(2e-4, 5e-4), islands=2, handle_probability=0.0)
 ```
+
+The `primitive` family draws its round holes and islands to the default `max_error` of
+0.1 mm, so give it clearances well above that ([Curves](pegs.md#outlines)); below it,
+`mjfit.peg` warns.
 
 ## The `convex` family
 

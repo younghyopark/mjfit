@@ -17,7 +17,8 @@ are swept from convex profiles. Every peg edge sits exactly one clearance from i
 edge, and MuJoCo collides every piece natively.
 
 - **Exact.** Circles and arcs become polygons that circumscribe them, so a round hole is
-  never smaller than drawn. The only error is a little extra play at the corners.
+  never smaller than drawn. Each polygon strays from its curve by at most `max_error`,
+  which should stay well below the clearance.
 - **Fast.** A peg and its hole are a few dozen convex pieces. On CPU they step an order of
   magnitude faster than MuJoCo's mesh SDF at equal or better accuracy
   ([benchmark](#benchmark)).
