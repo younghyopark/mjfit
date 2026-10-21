@@ -120,6 +120,12 @@ def tile(name: str) -> tuple[Image.Image, int]:
         j = model.joint('peg_joint').qposadr[0]
         peg_len = mjfit.load(name).get('peg_length', 0.03)
         data.qpos[j + 2] += 0.9 * peg_len
+    if kind == 'thread':  # screw the bolt down to the nut's base; whole leads keep the teeth meshed
+        cfg = mjfit.load(name)
+        lead = cfg['pitch'] * (cfg.get('n_starts') or 1)
+        j = model.joint('bolt_joint').qposadr[0]
+        turns = np.floor((data.qpos[j + 2] - model.body('nut').pos[2]) / lead + 1e-6)
+        data.qpos[j + 2] -= turns * lead
     mujoco.mj_forward(model, data)
     if kind == 'thread':  # cut the nut open
         for g in range(model.ngeom):
