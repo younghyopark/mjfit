@@ -23,7 +23,7 @@ GALLERY = [
     ('usb_c', 'USB-C, hollow peg'),
     ('db9', 'D-sub, nine pins'),
     ('rounded_convex', 'Rounded peg, handle, plate'),
-    ('m10', 'M10 bolt and nut (cut open)'),
+    ('m10', 'M10 bolt and nut'),
     ('spur_pair', '18:24 spur gears'),
 ]
 
@@ -127,10 +127,6 @@ def tile(name: str) -> tuple[Image.Image, int]:
         turns = np.floor((data.qpos[j + 2] - model.body('nut').pos[2]) / lead + 1e-6)
         data.qpos[j + 2] -= turns * lead
     mujoco.mj_forward(model, data)
-    if kind == 'thread':  # cut the nut open
-        for g in range(model.ngeom):
-            if model.body(model.geom_bodyid[g]).name == 'nut' and data.geom_xpos[g][1] < 0:
-                model.geom_rgba[g, 3] = 0.0
     pieces = sum(
         1
         for g in range(model.ngeom)
