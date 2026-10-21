@@ -60,14 +60,15 @@ def piece_colors(model: mujoco.MjModel, hues: dict[str, float]) -> None:
     for g in range(model.ngeom):
         body = model.body(model.geom_bodyid[g]).name
         name = model.geom(g).name
+        # A visual mesh covers the same surface as the pieces and would z-fight with them.
+        if name.endswith('_visual') or name.endswith('_hub'):
+            model.geom_rgba[g, 3] = 0.0
         if model.geom_contype[g] == 0 or body == 'world':
             continue
         hue = hues.get(body, 0.6) + rng.uniform(-0.04, 0.04)
         light, sat = rng.uniform(0.45, 0.75), rng.uniform(0.45, 0.8)
         model.geom_rgba[g] = (*colorsys.hls_to_rgb(hue % 1, light, sat), 1.0)
         model.geom_group[g] = 0
-        if name.endswith('_visual') or name.endswith('_hub'):
-            model.geom_rgba[g, 3] = 0.0
 
 
 def frame(model, data, cam, scale=1.0, azimuth=135.0, elevation=-32.0):
