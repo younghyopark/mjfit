@@ -54,8 +54,12 @@ def studio(xml_or_spec) -> mujoco.MjModel:
     return model
 
 
-def piece_colors(model: mujoco.MjModel, hues: dict[str, float]) -> None:
-    """One color per collision geom: a body's hue, varied in lightness and saturation."""
+def piece_colors(model: mujoco.MjModel, hues: dict[str, float], spread: float = 1.0) -> None:
+    """One color per collision geom: a body's hue, varied in lightness and saturation.
+
+    `spread` scales the variation. Hundreds of millimeter-sized pieces, as in a
+    thread, need little of it, or they read as noise.
+    """
     rng = np.random.default_rng(0)
     for g in range(model.ngeom):
         body = model.body(model.geom_bodyid[g]).name
@@ -65,8 +69,9 @@ def piece_colors(model: mujoco.MjModel, hues: dict[str, float]) -> None:
             model.geom_rgba[g, 3] = 0.0
         if model.geom_contype[g] == 0 or body == 'world':
             continue
-        hue = hues.get(body, 0.6) + rng.uniform(-0.04, 0.04)
-        light, sat = rng.uniform(0.45, 0.75), rng.uniform(0.45, 0.8)
+        hue = hues.get(body, 0.6) + spread * rng.uniform(-0.04, 0.04)
+        light = 0.6 + spread * rng.uniform(-0.15, 0.15)
+        sat = 0.625 + spread * rng.uniform(-0.175, 0.175)
         model.geom_rgba[g] = (*colorsys.hls_to_rgb(hue % 1, light, sat), 1.0)
         model.geom_group[g] = 0
 
@@ -109,6 +114,7 @@ def tile(name: str) -> tuple[Image.Image, int]:
     piece_colors(
         model,
         {'plate': 0.58, 'peg': 0.02, 'nut': 0.58, 'bolt': 0.08, 'gear_a': 0.58, 'gear_b': 0.08},
+        spread=0.2 if kind == 'thread' else 1.0,
     )
     if kind == 'peg':  # lift the peg out of the hole so both show
         j = model.joint('peg_joint').qposadr[0]
