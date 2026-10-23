@@ -1,0 +1,8 @@
+# An 18-tooth pinion on a 48-tooth rack.
+kind: gear
+teeth: 18
+rack_teeth: 48
+module: 0.003
+face_width: 0.008
+tooth_width: 0.48
+rack_backing: 2.0

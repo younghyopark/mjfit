@@ -1,4 +1,4 @@
-"""Spur gears and meshing gear pairs."""
+"""Spur gears, racks, and meshing gear pairs."""
 from __future__ import annotations
 
 import math
@@ -27,6 +27,8 @@ def gear(
     dedendum: float = 1.25,
     tooth_width: float = 0.48,
     center_distance: float | None = None,
+    rack_teeth: int | None = None,
+    rack_backing: float = 2.0,
     density: float = 7800.0,
     axles: bool = True,
     motor: bool = True,
@@ -41,18 +43,21 @@ def gear(
     mesh_dir: str | Path | None = None,
     scale: float = 1.0,
 ) -> str:
-    """A spur gear, or a pair of meshing spur gears, as an MJCF string.
+    """A spur gear, a rack and pinion, or a meshing pair, as an MJCF string.
 
     Each gear turns on a hinge about +z. Its collision shape is one convex
     prism per tooth plus one for the hub inside the root circle; a separate
     visual mesh renders the outline (the collision prisms are in geom group 3).
+    A rack (``rack_teeth``) slides along +x; its teeth are convex trapezoids
+    on a backing bar, and it meshes with the pinion at the pitch line.
 
     Hinged gears give MuJoCo's default Newton solver almost no contact
     regularization (their mass sits on the axis), so standalone files use the
     PGS solver, which meshes them at the exact ratio.
 
     Args:
-        teeth: Tooth count of one gear, or two counts for a meshing pair.
+        teeth: Tooth count of one gear, or two counts for a meshing pair. With
+            ``rack_teeth``, this is the pinion's count only.
         module: Pitch diameter per tooth, in meters; shared by both gears.
         face_width: Thickness of the gears.
         pressure_angle: In degrees.
@@ -61,7 +66,13 @@ def gear(
         tooth_width: Tooth thickness at the pitch circle, as a fraction of the
             circular pitch; below 0.5 leaves backlash.
         center_distance: Distance between the axes. Default: the sum of the
-            pitch radii.
+            pitch radii. With a rack, the height of the pinion centre above
+            the rack pitch line (default: the pinion's pitch radius).
+        rack_teeth: If set, build a linear rack with this many teeth and a
+            pinion of ``teeth`` (a single count). The rack body is ``rack``
+            on slide joint ``rack_slide``.
+        rack_backing: Thickness of the rack bar below the tooth roots, in
+            modules.
         density: kg/m^3, or one per gear.
         axles: Draw the axles (visual only).
         motor: Add a motor on the first gear's hinge (control in [-1, 1]).
@@ -79,19 +90,31 @@ def gear(
         scale: Multiplies every length.
 
     Returns:
-        The MJCF model as a string, with bodies ``gear_a`` (and ``gear_b``) on
-        hinges ``gear_a_hinge`` (and ``gear_b_hinge``).
+        The MJCF model as a string, with bodies ``gear_a`` (and ``gear_b`` or
+        ``rack``) on hinges ``gear_a_hinge`` (and ``gear_b_hinge``) or slide
+        ``rack_slide``.
     """
     counts = [int(t) for t in np.atleast_1d(teeth)]
     if len(counts) not in (1, 2) or any(t != t_in for t, t_in in zip(counts, np.atleast_1d(teeth))):
         raise ValueError(f"teeth must be one or two integers, got {teeth!r}.")
-    densities = [float(d) for d in np.broadcast_to(np.atleast_1d(density), (len(counts),))]
+    n_rack = None
+    if rack_teeth is not None:
+        n_rack = int(rack_teeth)
+        if n_rack != rack_teeth or n_rack < 3:
+            raise ValueError("rack_teeth must be an integer >= 3.")
+        if len(counts) != 1:
+            raise ValueError("rack_teeth needs one pinion tooth count, not a pair.")
+        if rack_backing <= 0:
+            raise ValueError("rack_backing must be positive.")
+    n_parts = 2 if n_rack is not None else len(counts)
+    densities = [float(d) for d in np.broadcast_to(np.atleast_1d(density), (n_parts,))]
     if face_width <= 0 or scale <= 0:
         raise ValueError("face_width and scale must be positive.")
     m, width = module * scale, face_width * scale
-    dims = [_dimensions(t, m, math.radians(pressure_angle), addendum, dedendum, tooth_width)
-            for t in counts]
+    pa = math.radians(pressure_angle)
+    dims = [_dimensions(t, m, pa, addendum, dedendum, tooth_width) for t in counts]
     pair = len(dims) == 2
+    backing = rack_backing * m
     if center_distance is None:
         distance = dims[0]['pitch_radius'] + dims[1]['pitch_radius'] if pair else 0.0
     else:
@@ -111,6 +134,29 @@ def gear(
     ET.SubElement(defaults, 'joint', damping=mj.num(damping), armature=mj.num(armature))
     meshes = mj.Meshes(model, mesh_dir)
     z = width * 1.25 / 2 + FLOOR_GAP                 # the hub is 1.25 face widths
+    if n_rack is not None:
+        pinion = dims[0]
+        pitch_line = pinion['pitch_radius'] if center_distance is None else center_distance * scale
+        if pitch_line - pinion['outer_radius'] < -dedendum * m:
+            raise ValueError("center_distance is too small: the pinion would reach the rack root.")
+        pitch = math.pi * m
+        half_len = 0.5 * n_rack * pitch
+        if standalone:
+            reach = max(half_len, pitch_line + pinion['outer_radius']) + 0.02 * scale
+            model.standalone(timestep=timestep, floor=floor, floor_size=max(0.4, 4 * reach),
+                             light_pos=(0.2, -0.35, 0.35), solver='PGS')
+        wb = model.section('worldbody')
+        # Tooth at -y, plus a small rotation so a pinion tooth sits in a rack space.
+        _emit_pinion(wb, meshes, pinion, name='gear_a', x=0.0, y=pitch_line, z=z,
+                     phase=-math.pi / 2 - 0.12, width=width, rho=densities[0], m=m,
+                     axles=axles, scale=scale)
+        _emit_rack(wb, meshes, n_rack=n_rack, module=m, pressure_angle=pa,
+                   addendum=addendum, dedendum=dedendum, tooth_width=tooth_width,
+                   backing=backing, z=z, width=width, rho=densities[1])
+        if motor:
+            ET.SubElement(model.section('actuator'), 'motor', name='drive_gear_a',
+                          joint='gear_a_hinge', gear=mj.num(motor_gear), ctrlrange='-1 1')
+        return model.to_xml()
     if standalone:
         reach = max(abs(x) + d['outer_radius'] for x, d in zip(xs, dims))
         model.standalone(timestep=timestep, floor=floor, floor_size=max(0.4, 4 * reach),
@@ -242,3 +288,75 @@ def _pieces(outline: np.ndarray, root_radius: float) -> list[np.ndarray]:
     n = len(outline)
     return [np.array([center, outline[i], outline[(i + 1) % n]]) for i in range(n)
             if abs(pg.signed_area(np.array([center, outline[i], outline[(i + 1) % n]]))) > 1e-14]
+
+
+def _emit_pinion(wb, meshes, d, *, name, x, y, z, phase, width, rho, m, axles, scale):
+    """One external spur gear on a z hinge, at (x, y, z)."""
+    outline = _outline(d, phase)
+    if axles:
+        height = z + width * 1.25 / 2 + 0.004 * scale
+        ET.SubElement(wb, 'geom', {'name': f'{name}_axle', 'type': 'cylinder',
+                                   'class': mj.VISUAL, 'rgba': AXLE_RGBA,
+                                   'size': mj.vec((0.45 * m, height / 2)),
+                                   'pos': mj.vec((x, y, height / 2))})
+    body = ET.SubElement(wb, 'body', name=name, childclass=mj.CLASS, pos=mj.vec((x, y, z)))
+    ET.SubElement(body, 'joint', name=f'{name}_hinge', type='hinge', axis='0 0 1')
+    visual = meshes.solid(f'{name}_visual', [(outline, [], -width / 2, width / 2)])
+    ET.SubElement(body, 'geom', {'name': f'{name}_visual', 'type': 'mesh', 'mesh': visual,
+                                 'class': mj.VISUAL, 'rgba': RGBA[0]})
+    ET.SubElement(body, 'geom', {'name': f'{name}_hub', 'type': 'cylinder',
+                                 'class': mj.VISUAL, 'rgba': HUB_RGBA,
+                                 'size': mj.vec((0.35 * d['root_radius'], width * 1.25 / 2))})
+    for i, piece in enumerate(_pieces(outline, d['root_radius'])):
+        mesh = meshes.prism(f'{name}_col_{i}', piece, -width / 2, width / 2)
+        ET.SubElement(body, 'geom', {'name': mesh, 'type': 'mesh', 'mesh': mesh,
+                                     'class': mj.COLLISION, 'density': mj.num(rho)})
+
+
+def _rack_tooth(center_x: float, module: float, pressure_angle: float, addendum: float,
+                dedendum: float, tooth_width: float) -> np.ndarray:
+    """CCW trapezoid of one rack tooth, pitch line at y = 0."""
+    pitch = math.pi * module
+    half = tooth_width * pitch / 2
+    tip_y = addendum * module
+    root_y = -dedendum * module
+    tip_half = half - tip_y * math.tan(pressure_angle)
+    root_half = half + (-root_y) * math.tan(pressure_angle)
+    if tip_half <= 1e-12:
+        raise ValueError("addendum and pressure_angle leave no rack tooth tip; "
+                         "reduce addendum or pressure_angle.")
+    return pg.ensure_ccw(np.array([
+        [center_x - root_half, root_y],
+        [center_x - tip_half, tip_y],
+        [center_x + tip_half, tip_y],
+        [center_x + root_half, root_y],
+    ]))
+
+
+def _emit_rack(wb, meshes, *, n_rack, module, pressure_angle, addendum, dedendum,
+               tooth_width, backing, z, width, rho):
+    """A linear rack on a slide along +x, pitch line at y = 0."""
+    pitch = math.pi * module
+    centers = [(i + 0.5 - n_rack / 2) * pitch for i in range(n_rack)]
+    teeth = [_rack_tooth(x, module, pressure_angle, addendum, dedendum, tooth_width)
+             for x in centers]
+    root_y = -dedendum * module
+    bottom = root_y - backing
+    left, right = centers[0] - pitch / 2, centers[-1] + pitch / 2
+    bar = pg.ensure_ccw(np.array([
+        [left, bottom], [right, bottom], [right, root_y], [left, root_y],
+    ]))
+    body = ET.SubElement(wb, 'body', name='rack', childclass=mj.CLASS, pos=mj.vec((0, 0, z)))
+    ET.SubElement(body, 'joint', name='rack_slide', type='slide', axis='1 0 0')
+    solids = [(bar, [], -width / 2, width / 2)]
+    solids += [(t, [], -width / 2, width / 2) for t in teeth]
+    visual = meshes.solid('rack_visual', solids)
+    ET.SubElement(body, 'geom', {'name': 'rack_visual', 'type': 'mesh', 'mesh': visual,
+                                 'class': mj.VISUAL, 'rgba': RGBA[1]})
+    mesh = meshes.prism('rack_bar', bar, -width / 2, width / 2)
+    ET.SubElement(body, 'geom', {'name': mesh, 'type': 'mesh', 'mesh': mesh,
+                                 'class': mj.COLLISION, 'density': mj.num(rho)})
+    for i, t in enumerate(teeth):
+        mesh = meshes.prism(f'rack_tooth_{i}', t, -width / 2, width / 2)
+        ET.SubElement(body, 'geom', {'name': mesh, 'type': 'mesh', 'mesh': mesh,
+                                     'class': mj.COLLISION, 'density': mj.num(rho)})

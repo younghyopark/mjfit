@@ -2,10 +2,12 @@
 
 ```python
 mjfit.gear(teeth=(18, 24), module=0.003, ...)
+mjfit.gear(teeth=18, rack_teeth=48, ...)
 ```
 
-`mjfit.gear` returns an MJCF model of one spur gear, or of a meshing pair, each on a
-hinge about +z. `help(mjfit.gear)` and `mjfit gear --help` list every parameter.
+`mjfit.gear` returns an MJCF model of one spur gear, a rack and pinion, or a meshing
+pair. Gears turn on a hinge about +z; a rack slides along +x. `help(mjfit.gear)` and
+`mjfit gear --help` list every parameter.
 
 ## Geometry
 
@@ -19,16 +21,23 @@ hinge about +z. `help(mjfit.gear)` and `mjfit gear --help` list every parameter.
 - **Collision.** One convex prism per tooth, closed by the chord between its root
   points, plus one hub prism through every root point. Together they are exactly the
   outline. If a tooth outline is not convex (an unusual setting), the gear falls back
-  to a fan of triangles around its center.
+  to a fan of triangles around its center. A rack tooth is a convex trapezoid with
+  straight flanks at the pressure angle, on a rectangular backing bar.
 - **Rendering.** A separate visual mesh renders the outline, and the collision prisms
   sit in geom group 3, hidden by default (press 3 in MuJoCo's viewer to show them).
+- **Rack and pinion.** `rack_teeth` builds a linear rack with that many teeth and a
+  pinion of `teeth` (a single count). The rack body is `rack`, on slide joint
+  `rack_slide` along +x. The pinion sits one pitch radius above the rack pitch line
+  (or `center_distance` above it). They roll at the pitch radius: rack travel equals
+  pinion angle times that radius. `rack_backing` is the bar thickness below the
+  roots, in modules. The rack is finite; past the last tooth the pinion freewheels.
 
 ## The scene
 
 The gears stand on short visual axles above a floor. `motor=True` adds a motor,
 `drive_gear_a`, on the first gear's hinge, with control in [-1, 1] times `motor_gear`
 (N m). The bodies are `gear_a` and `gear_b`, the hinges `gear_a_hinge` and
-`gear_b_hinge`.
+`gear_b_hinge`. A rack-and-pinion scene uses `gear_a` and `rack`.
 
 ## Use PGS for hinged gears
 
@@ -44,6 +53,6 @@ held by a gripper as in the paper's gear meshing task, is not affected.
 
 - The tooth outline is an involute approximation with an unfilleted root, not a
   manufacturing-grade CAD gear.
-- Only external spur gears; no helical, bevel, or internal gears.
+- External spur gears and a straight rack; no helical, bevel, or internal gears.
 - Torque passes between the gears through tooth contact alone; no gear constraint is
   added.
