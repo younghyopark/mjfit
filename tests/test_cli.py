@@ -54,9 +54,12 @@ def test_outline_from_csv_and_yaml(tmp_path):
 def test_thread_gear_and_export(tmp_path):
     run('thread', '--config', 'm6', '--driven', 'nut', '-o', tmp_path / 'm6.xml')
     run('gear', '--teeth', 12, 30, '--export-meshes', '-o', tmp_path / 'g.xml')
-    for f in ('m6.xml', 'g.xml'):
+    run('gear', '--teeth', 18, 54, '--internal', '-o', tmp_path / 'ring.xml')
+    for f in ('m6.xml', 'g.xml', 'ring.xml'):
         mujoco.MjModel.from_xml_path(str(tmp_path / f))
     assert (tmp_path / 'g_meshes' / 'gear_a_visual.obj').exists()
+    ring = mujoco.MjModel.from_xml_path(str(tmp_path / 'ring.xml'))
+    assert ring.body('gear_a').id and ring.body('gear_b').id
 
 
 def test_sample_writes_configs_models_and_grid(tmp_path):
@@ -82,3 +85,4 @@ def test_configs_listing_and_module_entry_point():
         [sys.executable, '-m', 'mjfit', 'configs'], capture_output=True, text=True, check=True
     ).stdout
     assert out.splitlines()[0].startswith('peg: ') and 'm10' in out
+    assert 'internal_18_54' in out

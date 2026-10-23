@@ -2,10 +2,12 @@
 
 ```python
 mjfit.gear(teeth=(18, 24), module=0.003, ...)
+mjfit.gear(teeth=(18, 54), internal=True, ...)
 ```
 
-`mjfit.gear` returns an MJCF model of one spur gear, or of a meshing pair, each on a
-hinge about +z. `help(mjfit.gear)` and `mjfit gear --help` list every parameter.
+`mjfit.gear` returns an MJCF model of one spur gear, a ring gear, or a meshing pair,
+each on a hinge about +z. `help(mjfit.gear)` and `mjfit gear --help` list every
+parameter.
 
 ## Geometry
 
@@ -15,13 +17,20 @@ hinge about +z. `help(mjfit.gear)` and `mjfit gear --help` list every parameter.
   `dedendum` are in modules.
 - **Backlash** comes from `tooth_width`, the tooth's thickness at the pitch circle as a
   fraction of the circular pitch. The default, 0.48, leaves a pair 4% of a pitch of
-  play. `center_distance` defaults to the sum of the pitch radii.
+  play. `center_distance` defaults to the sum of the pitch radii, or to their
+  difference when `internal=True`.
 - **Collision.** One convex prism per tooth, closed by the chord between its root
   points, plus one hub prism through every root point. Together they are exactly the
   outline. If a tooth outline is not convex (an unusual setting), the gear falls back
-  to a fan of triangles around its center.
+  to a fan of triangles around its center. A ring gear is convex wedges from each
+  inner-edge out to the rim.
 - **Rendering.** A separate visual mesh renders the outline, and the collision prisms
   sit in geom group 3, hidden by default (press 3 in MuJoCo's viewer to show them).
+- **Internal gears.** `internal=True` puts teeth on the inside of a ring. One tooth
+  count builds a ring alone; two counts put an external pinion inside the ring (the
+  second count is the ring and must be larger). They turn the same way, at the ratio
+  of their tooth counts. `rim` is the radial thickness outside the ring's roots, in
+  modules.
 
 ## The scene
 
@@ -44,6 +53,6 @@ held by a gripper as in the paper's gear meshing task, is not affected.
 
 - The tooth outline is an involute approximation with an unfilleted root, not a
   manufacturing-grade CAD gear.
-- Only external spur gears; no helical, bevel, or internal gears.
+- External spur gears and internal ring gears; no helical or bevel gears.
 - Torque passes between the gears through tooth contact alone; no gear constraint is
   added.
