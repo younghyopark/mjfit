@@ -43,6 +43,7 @@ mjfit peg --shape star -o star.xml           # a star-shaped peg and its hole
 mjfit peg --config usb_c -o usb_c.xml        # a bundled config: USB-C with its tongue
 mjfit thread --config m10 -o m10.xml         # an M10 bolt engaged in its nut
 mjfit gear --teeth 18 24 -o gears.xml        # a meshing pair of spur gears
+mjfit gear --teeth 18 54 --internal -o ring.xml  # a pinion inside a ring gear
 python -m mujoco.viewer --mjcf=usb_c.xml
 ```
 
@@ -68,6 +69,7 @@ model = mujoco.MjModel.from_xml_string(xml)
 
 bolt_and_nut = mjfit.thread(major_diameter=0.010, pitch=0.0015, clearance=1e-4)
 gears = mjfit.gear(teeth=(18, 24), module=0.003)
+ring = mjfit.gear(teeth=(18, 54), internal=True)
 ```
 
 Lengths are in meters, masses in kilograms, and angles in degrees.
@@ -93,9 +95,10 @@ hooked and undercut teeth. They can be single- or multi-start and left- or right
 The wedges only ever lose material to the helix's discretization, so they never
 interfere.
 
-**Gears** ([docs](docs/gears.md)). A spur gear or a meshing pair with involute teeth,
-on hinges, with an optional motor. Each tooth is one convex prism, and a pair meshes at
-its exact tooth ratio.
+**Gears** ([docs](docs/gears.md)). A spur gear, a ring gear, or a meshing pair with
+involute teeth, on hinges, with an optional motor. Each external tooth is one convex
+prism; a ring is convex wedges out to its rim. A pair meshes at its exact tooth ratio,
+and an internal pair turns both gears the same way.
 
 ## Many assemblies for training
 
@@ -148,7 +151,7 @@ package:
 | --- | --- |
 | peg | `circle`, `star`, `usb_a`, `usb_c`, `hdmi`, `rj45`, `db9`, `xlr3`, `rounded_convex` |
 | thread | `m10`, `m6`, `furniture_bench_leg` |
-| gear | `spur_pair`, `reduction_12_36`, `fine_pitch_32_48`, `single_24` |
+| gear | `spur_pair`, `reduction_12_36`, `fine_pitch_32_48`, `single_24`, `internal_18_54` |
 
 ## Using the models in your own scene
 

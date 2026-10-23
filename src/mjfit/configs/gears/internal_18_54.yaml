@@ -1,0 +1,8 @@
+# An 18-tooth pinion inside a 54-tooth ring, a 3:1 internal reduction.
+kind: gear
+teeth: [18, 54]
+internal: true
+module: 0.003
+face_width: 0.008
+tooth_width: 0.48
+rim: 2.5
