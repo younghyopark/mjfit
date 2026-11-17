@@ -78,6 +78,9 @@ clearance raise an error that names them.
   can be 0, so a chamfered peg can meet a sharp hole and the other way round. They
   need a convex outline (and, for the mouth, a convex plate), and the peg chamfer
   does not combine with islands yet. Below the chamfers the clearance is unchanged.
+  The angle is fixed at 45 degrees, the usual edge chamfer (drawn as size × 45°) and
+  the one the NIST task board's pegs and Isaac Lab's Factory parts use; another angle
+  would only need separate radial and axial lengths.
 - **Mass.** `peg_mass` fixes the total mass of the peg and handle, spread over their
   geoms by volume. Otherwise each geom gets `peg_density` (or `plate_density`).
 
