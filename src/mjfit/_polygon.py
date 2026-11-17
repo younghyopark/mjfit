@@ -309,6 +309,62 @@ def _ray_to_square(origin: np.ndarray, direction: np.ndarray, half: float) -> np
     return best
 
 
+def _ray_to_convex(origin: np.ndarray, direction: np.ndarray, outer: np.ndarray) -> np.ndarray:
+    """Where the ray origin + t * direction (t > 0) leaves the convex CCW polygon `outer`."""
+    t_best = math.inf
+    n = len(outer)
+    for i in range(n):
+        a, b = outer[i], outer[(i + 1) % n]
+        e = b - a
+        denom = cross2(direction[0], direction[1], e[0], e[1])
+        if abs(denom) < TOL:
+            continue
+        w = a - origin
+        t = cross2(w[0], w[1], e[0], e[1]) / denom
+        s = cross2(w[0], w[1], direction[0], direction[1]) / denom
+        if t > 1e-12 and -1e-9 <= s <= 1 + 1e-9:
+            t_best = min(t_best, t)
+    if not math.isfinite(t_best):
+        raise ValueError("A ray from the hole misses the plate.")
+    return origin + t_best * direction
+
+
+def bisector_wedges(hole: np.ndarray, outer: np.ndarray) -> list[np.ndarray]:
+    """Convex `outer` minus a convex `hole`, cut into one wedge per hole edge.
+
+    Each wedge is bounded by one hole edge, the outward bisector rays of its
+    two corners, and the outer boundary (including any outer corners between
+    the rays). The bisectors of a convex hole diverge, so the wedges are
+    convex and tile the plate. A mitred outward offset of the hole moves each
+    corner along its bisector, so every offset of the hole cuts each wedge
+    along a single edge: the property a chamfered mouth needs.
+    """
+    center = hole.mean(axis=0)
+    mitre = offset_outward(hole, 1.0) - hole           # bisector direction per corner
+    ends = [_ray_to_convex(v, d, outer) for v, d in zip(hole, mitre)]
+
+    def angle(p):
+        return math.atan2(p[1] - center[1], p[0] - center[0])
+
+    wedges = []
+    n = len(hole)
+    for i in range(n):
+        j = (i + 1) % n
+        a0 = angle(ends[i])
+        span = (angle(ends[j]) - a0) % (2 * math.pi)
+        between = []
+        for c in outer:
+            off = (angle(c) - a0) % (2 * math.pi)
+            if 1e-9 < off < span - 1e-9:
+                between.append((off, c))
+        # CCW: out along corner i's bisector, along the outer boundary to corner
+        # j's bisector, in to corner j, and back along the hole edge.
+        verts = [ends[i]] + [c for _, c in sorted(between, key=lambda e: e[0])]
+        verts += [ends[j], hole[j], hole[i]]
+        wedges.append(np.asarray(verts))
+    return wedges
+
+
 def radial_wedges(hole: np.ndarray, half: float) -> list[np.ndarray]:
     """Square plate [-half, half]^2 minus a hole, cut into one wedge per hole edge.
 

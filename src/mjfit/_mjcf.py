@@ -17,7 +17,7 @@ CLASS = 'mjfit'                      # contact parameters for every part
 VISUAL = 'mjfit_visual'              # render-only geoms
 COLLISION = 'mjfit_collision'        # collision-only geoms, hidden by default
 
-_SECTIONS = ('compiler', 'option', 'default', 'asset', 'worldbody', 'actuator')
+_SECTIONS = ('compiler', 'option', 'size', 'default', 'asset', 'worldbody', 'actuator')
 
 
 def num(x: float) -> str:
@@ -71,12 +71,15 @@ class Model:
         return top
 
     def standalone(self, *, timestep: float, floor: bool, floor_size: float,
-                   light_pos, solver: str | None = None) -> None:
-        """What a file needs to run on its own: solver options, light, floor."""
+                   light_pos, solver: str | None = None, memory: str | None = None) -> None:
+        """What a file needs to run on its own: solver options, light, floor, and
+        (for scenes with many resting contacts) the constraint arena's size."""
         attrs = {'timestep': num(timestep), 'integrator': 'implicitfast'}
         if solver:
             attrs['solver'] = solver
         ET.SubElement(self.section('option'), 'option', attrs)
+        if memory:
+            ET.SubElement(self.section('size'), 'size', memory=memory)
         wb = self.section('worldbody')
         light_pos = np.asarray(light_pos, dtype=float)
         direction = -light_pos / np.linalg.norm(light_pos)
@@ -87,8 +90,8 @@ class Model:
                                        'rgba': '0.92 0.92 0.92 1'})
 
     def to_xml(self) -> str:
-        # <option> and <compiler> are single elements, not containers.
-        for tag in ('option', 'compiler'):
+        # <option>, <size> and <compiler> are single elements, not containers.
+        for tag in ('option', 'size', 'compiler'):
             if tag in self.sections:
                 wrapper = self.sections[tag]
                 index = list(self.root).index(wrapper)
@@ -124,6 +127,31 @@ class Meshes:
             lo, hi = ring.copy(), ring.copy()
             lo[:, 2], hi[:, 2] = z0, z1
             ET.SubElement(self.asset, 'mesh', name=name, vertex=vec(np.vstack([lo, hi])))
+        return name
+
+    def loft(self, name: str, bottom: np.ndarray, z0: float, top: np.ndarray, z1: float) -> str:
+        """Two convex polygons with matching vertices, at z0 and z1, and the
+        flat faces between them (MuJoCo hulls it). A prism when they agree."""
+        if self.dir is not None:
+            write_obj_faces(self.dir / f'{name}.obj',
+                            *layered_triangles([([(bottom, z0), (top, z1)], [])]))
+            ET.SubElement(self.asset, 'mesh', name=name, file=f'{name}.obj')
+        else:
+            lo = np.column_stack([bottom, np.full(len(bottom), z0)])
+            hi = np.column_stack([top, np.full(len(top), z1)])
+            ET.SubElement(self.asset, 'mesh', name=name, vertex=vec(np.vstack([lo, hi])))
+        return name
+
+    def layered(self, name: str, solids) -> str:
+        """A visual mesh like `solid`, for solids whose rings change between
+        levels (chamfers): see `layered_triangles`."""
+        verts, faces = layered_triangles(solids)
+        if self.dir is not None:
+            write_obj_faces(self.dir / f'{name}.obj', verts, faces)
+            ET.SubElement(self.asset, 'mesh', name=name, file=f'{name}.obj')
+        else:
+            ET.SubElement(self.asset, 'mesh', name=name, vertex=vec(verts),
+                          face=' '.join(str(int(i)) for i in np.ravel(faces)))
         return name
 
     def points(self, name: str, vertices: np.ndarray, faces=None) -> str:
@@ -181,6 +209,42 @@ def extrusion_triangles(solids) -> tuple[np.ndarray, np.ndarray]:
                     faces += [(b0, b1, t1), (b0, t1, t0)]
                 else:
                     faces += [(b0, t1, b1), (b0, t0, t1)]
+    return np.asarray(verts), np.asarray(faces)
+
+
+def layered_triangles(solids) -> tuple[np.ndarray, np.ndarray]:
+    """Vertices and outward-facing triangles of solids whose rings vary with height.
+
+    Each solid is (outer, holes): `outer` is a list of (polygon, z) levels from
+    bottom to top, all with the same vertex count, and each hole is a list of
+    levels of its own that starts and ends at the outer's first and last z.
+    Walls join consecutive levels vertex to vertex; the caps are the bottom
+    and top levels, triangulated with their holes.
+    """
+    verts: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, int, int]] = []
+
+    def add(x, y, z) -> int:
+        verts.append((float(x), float(y), float(z)))
+        return len(verts) - 1
+
+    for outer, holes in solids:
+        for k, flip in ((0, True), (-1, False)):
+            ring, z = outer[k]
+            for tri in pg.triangulate(ring, [h[k][0] for h in holes]):
+                ids = [add(p[0], p[1], z) for p in tri]
+                faces.append((ids[0], ids[2], ids[1]) if flip else (ids[0], ids[1], ids[2]))
+        for levels, outward in [(outer, True)] + [(h, False) for h in holes]:
+            for (r0, z0), (r1, z1) in zip(levels[:-1], levels[1:]):
+                n = len(r0)
+                for i in range(n):
+                    j = (i + 1) % n
+                    b0, b1 = add(r0[i, 0], r0[i, 1], z0), add(r0[j, 0], r0[j, 1], z0)
+                    t1, t0 = add(r1[j, 0], r1[j, 1], z1), add(r1[i, 0], r1[i, 1], z1)
+                    if outward:
+                        faces += [(b0, b1, t1), (b0, t1, t0)]
+                    else:
+                        faces += [(b0, t1, b1), (b0, t0, t1)]
     return np.asarray(verts), np.asarray(faces)
 
 

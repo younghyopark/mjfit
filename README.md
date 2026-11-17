@@ -85,6 +85,7 @@ a shape from `mjfit.shapes`: `circle`, `rect`, `stadium`, `trapezoid`, `ngon`, `
 | A wider grip section above the peg | `handle_height`, and optionally a `handle` outline |
 | A convex outer plate that keeps a rim around the hole and handle | `plate`, `min_rim` |
 | A closed hole | `bottom_thickness` |
+| A 45-degree lead-in on the peg's tip or the hole's mouth | `peg_chamfer`, `hole_chamfer` |
 | A fixed total mass for the peg | `peg_mass` |
 
 **Threads** ([docs](docs/threads.md)). A bolt and its nut, swept from ISO metric,
@@ -94,8 +95,8 @@ The wedges only ever lose material to the helix's discretization, so they never
 interfere.
 
 **Gears** ([docs](docs/gears.md)). A spur gear or a meshing pair with involute teeth,
-on hinges, with an optional motor. Each tooth is one convex prism, and a pair meshes at
-its exact tooth ratio.
+on hinges, with an optional motor, or bored (and chamfered) and free on fixed shafts.
+Each tooth is one convex prism, and a pair meshes at its exact tooth ratio.
 
 ## Many assemblies for training
 
