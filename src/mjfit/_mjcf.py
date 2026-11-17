@@ -17,7 +17,7 @@ CLASS = 'mjfit'                      # contact parameters for every part
 VISUAL = 'mjfit_visual'              # render-only geoms
 COLLISION = 'mjfit_collision'        # collision-only geoms, hidden by default
 
-_SECTIONS = ('compiler', 'option', 'default', 'asset', 'worldbody', 'actuator')
+_SECTIONS = ('compiler', 'option', 'size', 'default', 'asset', 'worldbody', 'actuator')
 
 
 def num(x: float) -> str:
@@ -71,12 +71,15 @@ class Model:
         return top
 
     def standalone(self, *, timestep: float, floor: bool, floor_size: float,
-                   light_pos, solver: str | None = None) -> None:
-        """What a file needs to run on its own: solver options, light, floor."""
+                   light_pos, solver: str | None = None, memory: str | None = None) -> None:
+        """What a file needs to run on its own: solver options, light, floor, and
+        (for scenes with many resting contacts) the constraint arena's size."""
         attrs = {'timestep': num(timestep), 'integrator': 'implicitfast'}
         if solver:
             attrs['solver'] = solver
         ET.SubElement(self.section('option'), 'option', attrs)
+        if memory:
+            ET.SubElement(self.section('size'), 'size', memory=memory)
         wb = self.section('worldbody')
         light_pos = np.asarray(light_pos, dtype=float)
         direction = -light_pos / np.linalg.norm(light_pos)
@@ -87,8 +90,8 @@ class Model:
                                        'rgba': '0.92 0.92 0.92 1'})
 
     def to_xml(self) -> str:
-        # <option> and <compiler> are single elements, not containers.
-        for tag in ('option', 'compiler'):
+        # <option>, <size> and <compiler> are single elements, not containers.
+        for tag in ('option', 'size', 'compiler'):
             if tag in self.sections:
                 wrapper = self.sections[tag]
                 index = list(self.root).index(wrapper)

@@ -95,8 +95,8 @@ The wedges only ever lose material to the helix's discretization, so they never
 interfere.
 
 **Gears** ([docs](docs/gears.md)). A spur gear or a meshing pair with involute teeth,
-on hinges, with an optional motor. Each tooth is one convex prism, and a pair meshes at
-its exact tooth ratio.
+on hinges, with an optional motor, or bored (and chamfered) and free on fixed shafts.
+Each tooth is one convex prism, and a pair meshes at its exact tooth ratio.
 
 ## Many assemblies for training
 
