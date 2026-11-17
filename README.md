@@ -85,6 +85,7 @@ a shape from `mjfit.shapes`: `circle`, `rect`, `stadium`, `trapezoid`, `ngon`, `
 | A wider grip section above the peg | `handle_height`, and optionally a `handle` outline |
 | A convex outer plate that keeps a rim around the hole and handle | `plate`, `min_rim` |
 | A closed hole | `bottom_thickness` |
+| A 45-degree lead-in on the peg's tip or the hole's mouth | `peg_chamfer`, `hole_chamfer` |
 | A fixed total mass for the peg | `peg_mass` |
 
 **Threads** ([docs](docs/threads.md)). A bolt and its nut, swept from ISO metric,
