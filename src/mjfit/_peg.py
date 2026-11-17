@@ -34,6 +34,8 @@ def peg(
     plate_thickness: float = 0.01,
     min_rim: float = 0.0,
     bottom_thickness: float = 0.0,
+    peg_chamfer: float = 0.0,
+    hole_chamfer: float = 0.0,
     peg_mass: float | None = None,
     peg_density: float = 1000.0,
     plate_density: float = 1000.0,
@@ -83,6 +85,13 @@ def peg(
             hole and handle.
         bottom_thickness: Closes the hole from below with a bottom this thick;
             0 leaves a through hole.
+        peg_chamfer: Bevels the peg's tip at 45 degrees: the tip face is the
+            peg outline moved in by this much, widening to the full outline
+            this far up. 0 for a sharp edge. Needs a convex peg outline.
+        hole_chamfer: Bevels the hole's mouth at 45 degrees: the mouth is the
+            hole outline moved out by this much, narrowing to the hole this
+            far down. 0 for a sharp edge. Needs a convex hole and a convex
+            plate.
         peg_mass: Total mass of the peg and handle in kg, spread by volume.
             Overrides ``peg_density``.
         peg_density: Density of the peg, kg/m^3.
@@ -109,14 +118,16 @@ def peg(
     """
     lengths = dict(clearance=clearance, peg_length=peg_length, handle_height=handle_height,
                    handle_margin=handle_margin, plate_thickness=plate_thickness, min_rim=min_rim,
-                   bottom_thickness=bottom_thickness, spawn_height=spawn_height)
+                   bottom_thickness=bottom_thickness, peg_chamfer=peg_chamfer,
+                   hole_chamfer=hole_chamfer, spawn_height=spawn_height)
     for name, value in lengths.items():
         if not (isinstance(value, numbers.Real) and math.isfinite(value)):
             raise ValueError(f"{name} must be a finite number, got {value!r}.")
     _check(scale > 0, "scale must be positive.")
     for name in ('peg_length', 'plate_thickness'):
         _check(lengths[name] > 0, f"{name} must be positive.")
-    for name in ('clearance', 'handle_height', 'handle_margin', 'min_rim', 'bottom_thickness'):
+    for name in ('clearance', 'handle_height', 'handle_margin', 'min_rim', 'bottom_thickness',
+                 'peg_chamfer', 'hole_chamfer'):
         _check(lengths[name] >= 0, f"{name} must be nonnegative.")
     _check(peg_density > 0 and plate_density > 0, "Densities must be positive.")
     _check(peg_mass is None or (math.isfinite(peg_mass) and peg_mass > 0),
@@ -133,6 +144,7 @@ def peg(
     length, thick = peg_length * scale, plate_thickness * scale
     handle_h, margin = handle_height * scale, handle_margin * scale
     rim, bottom = min_rim * scale, bottom_thickness * scale
+    peg_ch, hole_ch = peg_chamfer * scale, hole_chamfer * scale
 
     def resolve(spec, name, fits=False):
         poly = shapes.from_spec(spec, name=name)
@@ -191,6 +203,17 @@ def peg(
             plate_pieces = pg.radial_wedges(hole_poly, half)
         else:
             plate_pieces = pg.triangulate(outer, [hole_poly])
+    mouth = None
+    if hole_ch > 0:
+        _check(pg.is_convex(hole_poly), "hole_chamfer needs a convex hole.")
+        _check(hole_ch < thick, "hole_chamfer must be smaller than plate_thickness.")
+        mouth = pg.offset_outward(hole_poly, hole_ch)
+        _check(pg.offset_is_valid(hole_poly, mouth) and pg.min_rim(outer, mouth) > 1e-10,
+               f"hole_chamfer {hole_chamfer:g} m leaves no rim between the mouth and the plate edge.")
+        # Wedges between the corner bisectors: the chamfer moves each hole corner
+        # along its bisector, so the mouth cuts every wedge along one edge.
+        plate_pieces = pg.bisector_wedges(hole_poly, outer)
+        mouth_pieces = pg.bisector_wedges(mouth, outer)
     island_pieces = [p for island in isl
                      for p in ([island] if pg.is_convex(island) else pg.ear_clip(island))]
 
@@ -198,8 +221,12 @@ def peg(
     # Each entry: (geom name, polygon, z0, z1, rgba), z in the peg frame whose
     # origin is the middle of the insertion section.
     parts: list[tuple[str, np.ndarray, float, float, str]] = []
+    # Pieces whose cross-section changes with height: (name, bottom polygon,
+    # z0, top polygon, z1, rgba), with matching vertices.
+    lofts: list[tuple[str, np.ndarray, float, np.ndarray, float, str]] = []
     handle_poly = None
     if include_peg:
+        _check(not (peg_ch > 0 and pockets), "peg_chamfer does not support islands yet.")
         if pockets:
             depth = thick + c                      # islands are as tall as the plate
             _check(depth < length, "peg_length must exceed plate_thickness + clearance so "
@@ -209,8 +236,17 @@ def peg(
             for k, p in enumerate(pg.convex_pieces(insert)):
                 parts.append((f'peg_back_{k}', p, -length / 2 + depth, length / 2, PEG_RGBA))
         else:
+            z_tip = -length / 2
+            if peg_ch > 0:
+                _check(pg.is_convex(insert), "peg_chamfer needs a convex peg outline.")
+                _check(peg_ch < length, "peg_chamfer must be smaller than peg_length.")
+                tip = pg.offset_inward(insert, peg_ch)
+                _check(pg.offset_is_valid(insert, tip),
+                       f"peg_chamfer {peg_chamfer:g} m is too large for this peg outline.")
+                lofts.append(('peg_tip', tip, z_tip, insert, z_tip + peg_ch, PEG_RGBA))
+                z_tip += peg_ch
             for k, p in enumerate(pg.convex_pieces(insert)):
-                parts.append((f'peg_{k}', p, -length / 2, length / 2, PEG_RGBA))
+                parts.append((f'peg_{k}', p, z_tip, length / 2, PEG_RGBA))
         if handle_h > 0:
             if handle is not None:
                 handle_poly = pg.convex_outline(resolve(handle, 'handle') - shift, 'Handle outline')
@@ -227,6 +263,7 @@ def peg(
     masses = {}
     if peg_mass is not None:
         volumes = {name: abs(pg.signed_area(p)) * (z1 - z0) for name, p, z0, z1, _ in parts}
+        volumes.update({name: _loft_volume(p0, z0, p1, z1) for name, p0, z0, p1, z1, _ in lofts})
         total = sum(volumes.values())
         masses = {name: peg_mass * v / total for name, v in volumes.items()}
 
@@ -244,16 +281,31 @@ def peg(
                                pos=mj.vec((0, 0, bottom + thick / 2)))
     if free_plate:
         ET.SubElement(plate_body, 'freejoint', name='plate_joint')
+    lip = thick / 2 - hole_ch                    # where the mouth's chamfer starts
     if meshes.exporting:
-        solids = [(outer, [hole_poly], -thick / 2, thick / 2)]
-        solids += [(island, [], -thick / 2, thick / 2) for island in isl]
+        if mouth is None:
+            solids = [(outer, [hole_poly], -thick / 2, thick / 2)]
+            solids += [(island, [], -thick / 2, thick / 2) for island in isl]
+            mesh = meshes.solid('plate_visual', solids)
+        else:
+            levels = [[(outer, -thick / 2), (outer, thick / 2)],
+                      [[(hole_poly, -thick / 2), (hole_poly, lip), (mouth, thick / 2)]]]
+            solids = [levels] + [([(island, -thick / 2), (island, thick / 2)], [])
+                                 for island in isl]
+            mesh = meshes.layered('plate_visual', solids)
         ET.SubElement(plate_body, 'geom', {'type': 'mesh', 'class': mj.VISUAL, 'rgba': PLATE_RGBA,
-                                           'mesh': meshes.solid('plate_visual', solids)})
+                                           'mesh': mesh})
     pieces = [(f'plate_{k}', p) for k, p in enumerate(plate_pieces)]
     pieces += [(f'island_{k}', p) for k, p in enumerate(island_pieces)]
     for name, p in pieces:
-        _geom(plate_body, name, meshes.prism(name, p, -thick / 2, thick / 2), PLATE_RGBA,
+        top = lip if mouth is not None and name.startswith('plate_') else thick / 2
+        _geom(plate_body, name, meshes.prism(name, p, -thick / 2, top), PLATE_RGBA,
               collision, density=plate_density)
+    if mouth is not None:
+        for k, (p0, p1) in enumerate(zip(plate_pieces, mouth_pieces)):
+            name = f'plate_mouth_{k}'
+            _geom(plate_body, name, meshes.loft(name, p0, lip, p1, thick / 2), PLATE_RGBA,
+                  collision, density=plate_density)
     if bottom > 0:
         _geom(plate_body, 'bottom', meshes.prism('bottom', outer, -thick / 2 - bottom, -thick / 2),
               BOTTOM_RGBA, collision, density=plate_density)
@@ -266,15 +318,24 @@ def peg(
             if pockets:
                 solids = [(insert, list(pockets), -length / 2, -length / 2 + thick + c),
                           (insert, [], -length / 2 + thick + c, length / 2)]
+                mesh = meshes.solid('peg_visual', solids)
+            elif peg_ch > 0:
+                tip = lofts[0][1]
+                mesh = meshes.layered('peg_visual', [([(tip, -length / 2),
+                                                       (insert, -length / 2 + peg_ch),
+                                                       (insert, length / 2)], [])])
             else:
-                solids = [(insert, [], -length / 2, length / 2)]
+                mesh = meshes.solid('peg_visual', [(insert, [], -length / 2, length / 2)])
             ET.SubElement(peg_body, 'geom', {'type': 'mesh', 'class': mj.VISUAL, 'rgba': PEG_RGBA,
-                                             'mesh': meshes.solid('peg_visual', solids)})
+                                             'mesh': mesh})
             if handle_poly is not None:
                 ET.SubElement(peg_body, 'geom', {
                     'type': 'mesh', 'class': mj.VISUAL, 'rgba': HANDLE_RGBA,
                     'mesh': meshes.solid('handle_visual',
                                          [(handle_poly, [], length / 2, length / 2 + handle_h)])})
+        for name, p0, z0, p1, z1, rgba in lofts:
+            _geom(peg_body, name, meshes.loft(name, p0, z0, p1, z1), rgba, collision,
+                  density=peg_density, mass=masses.get(name))
         for name, p, z0, z1, rgba in parts:
             _geom(peg_body, name, meshes.prism(name, p, z0, z1), rgba, collision,
                   density=peg_density, mass=masses.get(name))
@@ -290,6 +351,14 @@ def _geom(body, name, mesh, rgba, extra, *, density, mass=None):
     else:
         attrs['density'] = mj.num(density)
     ET.SubElement(body, 'geom', attrs)
+
+
+def _loft_volume(bottom: np.ndarray, z0: float, top: np.ndarray, z1: float) -> float:
+    """Volume between two polygons with matching vertices (exact by Simpson's
+    rule: the cross-section's area is quadratic in height)."""
+    mid = (bottom + top) / 2
+    return (z1 - z0) / 6 * (abs(pg.signed_area(bottom)) + 4 * abs(pg.signed_area(mid))
+                            + abs(pg.signed_area(top)))
 
 
 def _check(ok: bool, message: str) -> None:

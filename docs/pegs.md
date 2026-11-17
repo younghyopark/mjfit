@@ -71,6 +71,16 @@ clearance raise an error that names them.
   hole and the handle.
 - **Bottom.** `bottom_thickness > 0` closes the hole from below with a slab following
   the plate's outline.
+- **Chamfers.** `peg_chamfer` bevels the peg's tip and `hole_chamfer` the hole's
+  mouth, both at 45 degrees: the tip face is the peg outline moved in by
+  `peg_chamfer` and widens to the full outline that far up; the mouth is the hole
+  outline moved out by `hole_chamfer` and narrows to the hole that far down. Either
+  can be 0, so a chamfered peg can meet a sharp hole and the other way round. They
+  need a convex outline (and, for the mouth, a convex plate), and the peg chamfer
+  does not combine with islands yet. Below the chamfers the clearance is unchanged.
+  The angle is fixed at 45 degrees, the usual edge chamfer (drawn as size × 45°) and
+  the one the NIST task board's pegs and Isaac Lab's Factory parts use; another angle
+  would only need separate radial and axial lengths.
 - **Mass.** `peg_mass` fixes the total mass of the peg and handle, spread over their
   geoms by volume. Otherwise each geom gets `peg_density` (or `plate_density`).
 
@@ -81,15 +91,24 @@ clearance raise an error that names them.
   the edge and the rays through its two ends. Otherwise, and for an explicit plate
   outline, the plate minus the hole is triangulated (with
   [earcut](https://github.com/mapbox/earcut)).
+- **Chamfered mouth.** With `hole_chamfer`, the plate is cut along the outward
+  bisectors of the hole's corners instead (the hole is convex, so they diverge), and
+  each wedge is split at the start of the chamfer: a prism below, and above it a band
+  whose inner edge runs from the hole up to the mouth. A mitred offset moves each
+  corner along its bisector, so the band's faces are flat.
 - **Peg.** A convex peg is one prism. A star-shaped one is fanned from its center, and
   anything else is ear-clipped into triangles.
 - **Hollow peg.** The ring is triangulated around its pockets, and the solid back is cut
   like a solid peg.
 - **Islands** are single prisms if convex, else ear-clipped.
 
-Every piece is a counterclockwise convex polygon extruded into a prism. MuJoCo takes
-each mesh's convex hull, which for these prisms is the prism itself. The tests check
-this by comparing every compiled hull's volume with its prism's.
+A chamfered tip is one more piece: the tip face and the full outline, joined by flat
+faces.
+
+Every piece is a counterclockwise convex polygon extruded into a prism, or two such
+polygons with matching corners joined by flat faces (the chamfers). MuJoCo takes each
+mesh's convex hull, which for these pieces is the piece itself. The tests check this
+by comparing every compiled hull's volume with the piece's exact volume.
 
 ## Frames and names
 

@@ -255,3 +255,183 @@ def test_mesh_export_loads_and_matches(tmp_path):
     inline = mujoco.MjModel.from_xml_string(mjfit.peg(**kw))
     assert exported.body('peg').mass[0] == pytest.approx(inline.body('peg').mass[0], rel=1e-6)
     assert (tmp_path / 'star_meshes' / 'plate_visual.obj').exists()
+
+
+# ----- chamfers ---------------------------------------------------------------
+
+CHAMFERED = {
+    'round': dict(hole=shapes.circle(0.0045, max_error=1e-5), clearance=5e-4,
+                  peg_chamfer=5e-4, hole_chamfer=1e-3, peg_length=0.05, plate_thickness=0.025),
+    'rect': dict(hole=shapes.rect(0.016, 0.010), clearance=1e-4, peg_chamfer=1.6e-3),
+    'hole_only': dict(hole=shapes.rect(0.012, 0.008), clearance=1e-4, hole_chamfer=1e-3),
+    'plate': dict(peg=shapes.bezier(CONTROL, 0.5), clearance=1e-4, peg_chamfer=1e-3,
+                  hole_chamfer=1.5e-3, plate=shapes.bezier(CONTROL * 3, 0.4), center=False,
+                  handle_height=0.01, peg_mass=0.2),
+}
+
+
+def _loft_volume(v: np.ndarray) -> float:
+    """Volume of a loft given as a bottom ring followed by a matching top ring."""
+    n = len(v) // 2
+    lo, hi = v[:n, :2], v[n:, :2]
+    area = [abs(pg.signed_area(r)) for r in (lo, (lo + hi) / 2, hi)]
+    return (v[n:, 2].mean() - v[:n, 2].mean()) / 6 * (area[0] + 4 * area[1] + area[2])
+
+
+def _volume(model: mujoco.MjModel, body: str) -> float:
+    b = model.body(body).id
+    return sum(hull_volume(model, int(model.geom_dataid[g]))
+               for g in range(model.ngeom) if model.geom_bodyid[g] == b)
+
+
+@pytest.mark.parametrize('case', CHAMFERED)
+def test_chamfered_pieces_are_exact_convex_lofts(case):
+    """Each chamfered piece is two rings joined by flat faces; MuJoCo's hull
+    of its points has exactly the loft's volume, so nothing bulges."""
+    xml = mjfit.peg(**CHAMFERED[case])
+    model = mujoco.MjModel.from_xml_string(xml)
+    for name, verts in inline_meshes(xml).items():
+        assert hull_volume(model, model.mesh(name).id) == pytest.approx(
+            _loft_volume(verts), rel=1e-6), name
+
+
+def _frustum(poly: np.ndarray, grow: float, height: float) -> float:
+    """Volume of a 45-degree band from `poly` to `poly` moved out by `grow`."""
+    return _loft_volume(np.vstack([np.column_stack([poly, np.zeros(len(poly))]),
+                                   np.column_stack([pg.offset_outward(poly, grow),
+                                                    np.full(len(poly), height)])]))
+
+
+@pytest.mark.parametrize('case', ['round', 'rect', 'hole_only'])
+def test_chamfered_parts_have_the_exact_volume(case):
+    """The pieces tile the chamfered plate and peg without gaps or overlaps."""
+    kw = {'peg_length': 0.03, 'plate_thickness': 0.01, 'peg_chamfer': 0.0, 'hole_chamfer': 0.0,
+          **CHAMFERED[case]}
+    model = mujoco.MjModel.from_xml_string(mjfit.peg(**kw))
+    hole = pg.ensure_ccw(np.asarray(kw['hole'], float))
+    hole = hole - mjfit._peg._centroid(hole)
+    insert = pg.offset_inward(hole, kw['clearance'])
+    t, h = kw['plate_thickness'], kw['hole_chamfer']
+    reach = float(np.abs(hole).max())
+    side = 2 * (reach + max(0.005, reach))
+    plate = side**2 * t - abs(pg.signed_area(hole)) * (t - h) - _frustum(hole, h, h)
+    length, p = kw['peg_length'], kw['peg_chamfer']
+    tip = pg.offset_inward(insert, p)
+    peg = abs(pg.signed_area(insert)) * (length - p) + _frustum(tip, p, p)
+    # MuJoCo keeps mesh vertices in float32.
+    assert _volume(model, 'plate') == pytest.approx(plate, rel=1e-6)
+    assert _volume(model, 'peg') == pytest.approx(peg, rel=1e-6)
+
+
+def test_chamfers_are_45_degrees_and_keep_the_clearance():
+    hole = shapes.rect(0.016, 0.010)
+    c, p, h, t = 1e-4, 1.6e-3, 1e-3, 0.01
+    meshes = inline_meshes(mjfit.peg(hole=hole, clearance=c, peg_chamfer=p, hole_chamfer=h,
+                                     plate_thickness=t, center=False))
+    insert = pg.offset_inward(hole, c)
+    tip = meshes['peg_tip']
+    n = len(tip) // 2
+    np.testing.assert_allclose(tip[:n, :2], pg.offset_inward(insert, p), atol=1e-15)
+    np.testing.assert_allclose(tip[n:, :2], insert, atol=1e-15)
+    assert tip[n:, 2].mean() - tip[:n, 2].mean() == pytest.approx(p, rel=1e-12)
+    # The mouth's top ring holds the hole moved out by h, h above its bottom ring.
+    mouth = pg.offset_outward(hole, h)
+    tops = np.vstack([v[len(v) // 2:] for k, v in meshes.items() if k.startswith('plate_mouth_')])
+    bots = np.vstack([v[:len(v) // 2] for k, v in meshes.items() if k.startswith('plate_mouth_')])
+    assert tops[:, 2].min() - bots[:, 2].max() == pytest.approx(h, rel=1e-12)
+    for corner in mouth:
+        assert np.min(np.linalg.norm(tops[:, :2] - corner, axis=1)) < 1e-15
+    # Below the mouth the straight plate pieces still hold the hole exactly.
+    for corner in hole:
+        lower = np.vstack([v[:, :2] for k, v in meshes.items()
+                           if k.startswith('plate_') and not k.startswith('plate_mouth_')])
+        assert np.min(np.linalg.norm(lower - corner, axis=1)) < 1e-15
+
+
+def test_chamfered_peg_slides_into_the_hole():
+    """A peg dropped off-centre onto the mouth is guided in by the chamfers; with
+    sharp edges it lands on the plate's top face."""
+    def drop(chamfer):
+        xml = mjfit.peg(hole=shapes.circle(0.006, max_error=1e-5), clearance=2e-4,
+                        peg_chamfer=chamfer, hole_chamfer=chamfer, spawn_height=0.002,
+                        peg_length=0.03, plate_thickness=0.01)
+        model = mujoco.MjModel.from_xml_string(xml)
+        data = mujoco.MjData(model)
+        data.qpos[model.joint('peg_joint').qposadr[0]] += 0.0012     # 6 clearances off-axis
+        mujoco.mj_step(model, data, nstep=1500)
+        tip = data.body('peg').xpos[2] - 0.015
+        return tip - model.body('plate').pos[2] - 0.005              # below the plate top
+    assert drop(1.5e-3) < -0.005
+    assert drop(0.0) > -1e-3                                      # rests on the rim
+
+
+@pytest.mark.parametrize('kw,match', [
+    (dict(hole=shapes.star(5, 0.012, 0.0054), hole_chamfer=1e-3), 'convex hole'),
+    (dict(peg=shapes.star(5, 0.012, 0.0054), peg_chamfer=1e-3), 'convex peg'),
+    (dict(hole=shapes.rect(0.01, 0.005), hole_chamfer=0.01), 'plate_thickness'),
+    (dict(hole=shapes.rect(0.01, 0.005), peg_chamfer=0.03), 'peg_length'),
+    (dict(hole=shapes.rect(0.01, 0.005), peg_chamfer=0.003), 'too large'),
+    (dict(hole=shapes.rect(0.01, 0.005), hole_chamfer=0.006, plate_size=0.02), 'no rim'),
+    (dict(hole=shapes.rect(0.02, 0.01), islands=[shapes.circle(0.002)], peg_chamfer=1e-3),
+     'islands'),
+    (dict(hole=shapes.rect(0.01, 0.005), peg_chamfer=-1e-3), 'nonnegative'),
+])
+def test_invalid_chamfers_are_rejected_with_a_reason(kw, match):
+    with pytest.raises(ValueError, match=match):
+        mjfit.peg(**kw)
+
+
+def test_chamfered_mesh_export_is_watertight_and_matches(tmp_path):
+    kw = CHAMFERED['plate']
+    path = tmp_path / 'chamfered.xml'
+    path.write_text(mjfit.peg(**kw, mesh_dir=tmp_path / 'meshes'))
+    exported = mujoco.MjModel.from_xml_path(str(path))
+    inline = mujoco.MjModel.from_xml_string(mjfit.peg(**kw))
+    assert exported.body('peg').mass[0] == pytest.approx(0.2, rel=1e-9)
+    assert inline.body('peg').mass[0] == pytest.approx(0.2, rel=1e-9)
+    for name in ('plate_visual', 'peg_visual'):
+        lines = (tmp_path / 'meshes' / f'{name}.obj').read_text().splitlines()
+        verts = np.array([list(map(float, ln.split()[1:])) for ln in lines if ln.startswith('v ')])
+        faces = np.array([list(map(int, ln.split()[1:])) for ln in lines
+                          if ln.startswith('f ')]) - 1
+        keys = {tuple(np.round(v, 12)): k for k, v in enumerate(verts)}
+        ids = np.array([keys[tuple(np.round(v, 12))] for v in verts])[faces]
+        edges = {}
+        for a, b, c in ids:
+            for e in ((a, b), (b, c), (c, a)):
+                edges[e] = edges.get(e, 0) + 1
+        # Every directed edge is matched by its reverse exactly once: closed and
+        # consistently oriented.
+        assert all(edges.get((b, a), 0) == n for (a, b), n in edges.items()), name
+        a, b, c = verts[faces[:, 0]], verts[faces[:, 1]], verts[faces[:, 2]]
+        assert np.einsum('ij,ij->i', a, np.cross(b, c)).sum() > 0, name     # outward
+
+
+def _in_loft(v: np.ndarray, pts: np.ndarray) -> np.ndarray:
+    """Whether each point lies in a loft (bottom ring, then matching top ring)."""
+    n = len(v) // 2
+    z0, z1 = v[:n, 2].mean(), v[n:, 2].mean()
+    s = (pts[:, 2] - z0) / (z1 - z0)
+    inside = np.zeros(len(pts), bool)
+    for k in np.flatnonzero((s > 0) & (s < 1)):
+        ring = v[:n, :2] + s[k] * (v[n:, :2] - v[:n, :2])
+        inside[k] = pg.points_inside(ring, pts[k:k + 1, :2])[0]
+    return inside
+
+
+@pytest.mark.parametrize('case', ['round', 'hole_only'])
+def test_chamfered_plate_pieces_cover_every_point_exactly_once(case):
+    kw = {'plate_thickness': 0.01, **CHAMFERED[case]}
+    xml = mjfit.peg(**kw, include_peg=False, center=False)
+    pieces = [v for k, v in inline_meshes(xml).items() if k.startswith('plate_')]
+    hole = pg.ensure_ccw(np.asarray(kw['hole'], float))
+    t, h = kw['plate_thickness'], kw['hole_chamfer']
+    lo = np.vstack(pieces).min(axis=0)
+    hi = np.vstack(pieces).max(axis=0)
+    pts = np.random.default_rng(0).uniform(lo, hi, size=(4000, 3))
+    count = sum(_in_loft(v, pts).astype(int) for v in pieces)
+    # The plate body sits at z = t/2, so its top is at t/2 in the meshes' frame.
+    grow = np.clip(pts[:, 2] - (t / 2 - h), 0, None)
+    in_hole = np.array([pg.points_inside(pg.offset_outward(hole, g), p[None, :2])[0]
+                        for g, p in zip(grow, pts)])
+    np.testing.assert_array_equal(count, (~in_hole).astype(int))
